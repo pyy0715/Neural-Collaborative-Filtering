@@ -67,7 +67,7 @@ class NeuMF(nn.Module):
         self.num_users = num_users
         self.num_items = num_items
         self.factor_num_mf = args.factor_num
-        self.factor_num_mlp =  args.layers[0]/2
+        self.factor_num_mlp =  int(args.layers[0]/2)
         self.layers = args.layers
         self.dropout = args.dropout
 
@@ -84,12 +84,13 @@ class NeuMF(nn.Module):
 
         self.affine_output = nn.Linear(in_features=args.layers[-1] + self.factor_num_mf, out_features=1)
         self.logistic = nn.Sigmoid()
+        self.init_weight()
 
     def init_weight(self):
-        nn.init.normal_(self.embedding_user_mlp, std=0.01)
-        nn.init.normal_(self.embedding_item_mlp, std=0.01)
-        nn.init.normal_(self.embedding_user_mf, std=0.01)
-        nn.init.normal_(self.embedding_item_mf, std=0.01)
+        nn.init.normal_(self.embedding_user_mlp.weight, std=0.01)
+        nn.init.normal_(self.embedding_item_mlp.weight, std=0.01)
+        nn.init.normal_(self.embedding_user_mf.weight, std=0.01)
+        nn.init.normal_(self.embedding_item_mf.weight, std=0.01)
         
         for m in self.fc_layers:
             if isinstance(m, nn.Linear):
@@ -117,4 +118,4 @@ class NeuMF(nn.Module):
         vector = torch.cat([mlp_vector, mf_vector], dim=-1)
         logits = self.affine_output(vector)
         rating = self.logistic(logits)
-        return rating
+        return rating.squeeze()

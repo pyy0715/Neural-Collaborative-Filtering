@@ -32,7 +32,7 @@ parser.add_argument("--dropout",
 	help="dropout rate")
 parser.add_argument("--batch_size", 
 	type=int, 
-	default=128, 
+	default=256, 
 	help="batch size for training")
 parser.add_argument("--epochs", 
 	type=int,
@@ -47,8 +47,8 @@ parser.add_argument("--factor_num",
 	default=32, 
 	help="predictive factors numbers in the model")
 parser.add_argument("--layers",
-    nargs='?', 
-    default='[64,32,16,8]',
+    nargs='+', 
+    default=[64,32,16,8],
     help="MLP layers. Note that the first layer is the concatenation of user and item embeddings. So layers[0]/2 is the embedding size.")
 parser.add_argument("--num_ng", 
 	type=int,
@@ -58,29 +58,42 @@ parser.add_argument("--num_ng_test",
 	type=int,
 	default=100, 
 	help="Number of negative samples for test set")
+parser.add_argument("--out", 
+	default=True,
+	help="save model or not")
 
+# set device and parameters
 args = parser.parse_args()
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+writer = SummaryWriter()
 
-
+# seed for Reproducibility
 util.seed_everything(args.seed)
+
+# load data
 ml_1m = pd.read_csv(
 	config.DATA_PATH, 
 	sep="::", 
 	names = ['user_id', 'item_id', 'rating', 'timestamp'], 
 	engine='python')
 
+# set the num_users, items
+num_users = ml_1m['user_id'].nunique()+1
+num_items = ml_1m['item_id'].nunique()+1
+
 # construct the train and test datasets
-data = data_utils.NCF_Data(args, m1_1m)
+data = data_utils.NCF_Data(args, ml_1m)
 train_loader =data.get_train_instance()
+test_loader =data.get_test_instance()
 
-
+# set model and loss, optimizer
 model = model.NeuMF(args, num_users, num_items)
 model = model.to(device)
-loss_function = nn.BCEWithLogitsLoss()
-optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
+loss_function = nn.BCELoss()
+optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
-count, best_hr = 0, 0
+# train, evaluation
+best_hr = 0
 for epoch in range(1, args.epochs+1):
 	model.train() # Enable dropout (if have).
 	start_time = time.time()
@@ -95,11 +108,12 @@ for epoch in range(1, args.epochs+1):
 		loss = loss_function(prediction, label)
 		loss.backward()
 		optimizer.step()
-		# writer.add_scalar('data/loss', loss.item(), count)
-		count += 1
+		writer.add_scalar('loss/Train_loss', loss.item(), epoch)
 
 	model.eval()
-	HR, NDCG = evaluate.metrics(model, test_loader, args.top_k)
+	HR, NDCG = evaluate.metrics(model, test_loader, args.top_k, device)
+	writer.add_scalar('Perfomance/HR@10', HR, epoch)
+	writer.add_scalar('Perfomance/NDCG@10', NDCG, epoch)
 
 	elapsed_time = time.time() - start_time
 	print("The time elapse of epoch {:03d}".format(epoch) + " is: " + 
@@ -114,5 +128,6 @@ for epoch in range(1, args.epochs+1):
 			torch.save(model, 
 				'{}{}.pth'.format(config.MODEL_PATH, config.MODEL))
 
+writer.close()
 print("End. Best epoch {:03d}: HR = {:.3f}, NDCG = {:.3f}".format(
 									best_epoch, best_hr, best_ndcg))

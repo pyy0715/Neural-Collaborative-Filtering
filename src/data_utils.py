@@ -12,14 +12,15 @@ class NCF_Data(object):
 		self.ratings = ratings
 		self.num_ng = args.num_ng
 		self.num_ng_test = args.num_ng_test
+		self.batch_size = args.batch_size
 
-		self.preprocess_ratings = self.reindex(self.ratings)
+		self.preprocess_ratings = self._reindex(self.ratings)
 
 		self.user_pool = set(self.ratings['user_id'].unique())
 		self.item_pool = set(self.ratings['item_id'].unique())
 
 		self.train_ratings, self.test_ratings = self._leave_one_out(self.preprocess_ratings)
-		self.negative = self._negative_sampling(self.preprocess_ratings)
+		self.negatives = self._negative_sampling(self.preprocess_ratings)
 		random.seed(args.seed)
 	
 	def _reindex(self, ratings):
@@ -52,16 +53,15 @@ class NCF_Data(object):
 		interact_status = (
 			ratings.groupby('user_id')['item_id']
 			.apply(set)
-            .reset_index()
-            .rename(columns={'item_id': 'interacted_items'})
-        )
+			.reset_index()
+			.rename(columns={'item_id': 'interacted_items'}))
 		interact_status['negative_items'] = interact_status['interacted_items'].apply(lambda x: self.item_pool - x)
 		interact_status['negative_samples'] = interact_status['negative_items'].apply(lambda x: random.sample(x, self.num_ng_test))
-		return interact_status[['userId', 'negative_items', 'negative_samples']]
+		return interact_status[['user_id', 'negative_items', 'negative_samples']]
 
 	def get_train_instance(self):
 		users, items, ratings = [], [], []
-		train_ratings = pd.merge(self.train_ratings, self.negatives[['userId', 'negative_items']], on='userId')
+		train_ratings = pd.merge(self.train_ratings, self.negatives[['user_id', 'negative_items']], on='user_id')
 		train_ratings['negatives'] = train_ratings['negative_items'].apply(lambda x: random.sample(x, self.num_ng))
 		for row in train_ratings.itertuples():
 			users.append(int(row.user_id))
@@ -75,7 +75,24 @@ class NCF_Data(object):
 			user_list=users,
 			item_list=items,
 			rating_list=ratings)
-		return torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+		return torch.utils.data.DataLoader(dataset, batch_size=self.batch_size, shuffle=True, num_workers=4)
+
+	def get_test_instance(self):
+		users, items, ratings = [], [], []
+		test_ratings = pd.merge(self.test_ratings, self.negatives[['user_id', 'negative_samples']], on='user_id')
+		for row in test_ratings.itertuples():
+			users.append(int(row.user_id))
+			items.append(int(row.item_id))
+			ratings.append(float(row.rating))
+			for i in getattr(row, 'negative_samples'):
+				users.append(int(row.user_id))
+				items.append(int(i))
+				ratings.append(float(0))
+		dataset = Rating_Datset(
+			user_list=users,
+			item_list=items,
+			rating_list=ratings)
+		return torch.utils.data.DataLoader(dataset, batch_size=self.num_ng_test+1, shuffle=False, num_workers=4)
 
 
 class Rating_Datset(torch.utils.data.Dataset):
@@ -86,7 +103,7 @@ class Rating_Datset(torch.utils.data.Dataset):
 		self.rating_list = rating_list
 
 	def __len__(self):
-		return self.user_list.size(0)
+		return len(self.user_list)
 
 	def __getitem__(self, idx):
 		user = self.user_list[idx]
@@ -96,5 +113,5 @@ class Rating_Datset(torch.utils.data.Dataset):
 		return (
 			torch.tensor(user, dtype=torch.long),
 			torch.tensor(item, dtype=torch.long),
-			torch.tensor(label, dtype=torch.float)
+			torch.tensor(rating, dtype=torch.float)
 			)
