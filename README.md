@@ -29,6 +29,6 @@ Best epoch 005: HR = 0.677, NDCG = 0.399
 `numpy==1.18.1`
 `torch==1.4.0`
 
-## Refrence
+## Reference
 * [Evaluation Part](https://github.com/guoyang9/NCF)
 * [Data Part](https://github.com/microsoft/recommenders/blob/master/reco_utils/recommender/ncf/dataset.py)
